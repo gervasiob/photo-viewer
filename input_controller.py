@@ -1,7 +1,5 @@
 import pygame
 
-from collections import deque
-import threading
 import time
 
 try:
@@ -63,18 +61,18 @@ class PhotoFrameController:
         self._pending_next = 0
         self._pending_click = 0
 
-        self._lock = threading.Lock()
-        self._actions = deque()
-
         self._gpio_enabled = False
         self._invert_rotation = invert_rotation
         self._clk_pin = clk_pin
         self._dt_pin = dt_pin
         self._sw_pin = sw_pin
 
-        self._last_clk_state = 0
+        self._last_clk_state = 1
+        self._last_sw_state = 1
         self._last_rotate_time = 0.0
-        self._rotate_debounce_sec = 0.002
+        self._rotate_debounce_sec = 0.001
+        self._last_click_time = 0.0
+        self._click_debounce_sec = 0.15
 
         if enable_gpio:
             self._setup_gpio()
@@ -104,36 +102,13 @@ class PhotoFrameController:
         )
 
         self._last_clk_state = GPIO.input(self._clk_pin)
-
-        GPIO.add_event_detect(
-            self._clk_pin,
-            GPIO.BOTH,
-            callback=self._on_clk_edge,
-            bouncetime=1,
-        )
-
-        GPIO.add_event_detect(
-            self._sw_pin,
-            GPIO.FALLING,
-            callback=self._on_switch_press,
-            bouncetime=200,
-        )
+        self._last_sw_state = GPIO.input(self._sw_pin)
 
         self._gpio_enabled = True
 
     def close(self):
         if GPIO is None or not self._gpio_enabled:
             return
-
-        try:
-            GPIO.remove_event_detect(self._clk_pin)
-        except Exception:
-            pass
-
-        try:
-            GPIO.remove_event_detect(self._sw_pin)
-        except Exception:
-            pass
 
         try:
             GPIO.cleanup(
@@ -144,51 +119,42 @@ class PhotoFrameController:
 
         self._gpio_enabled = False
 
-    def _enqueue_action(self, action):
-        with self._lock:
-            self._actions.append(action)
+    def update(self):
+        if GPIO is None or not self._gpio_enabled:
+            return
 
-    def _on_clk_edge(self, _channel):
         clk_state = GPIO.input(self._clk_pin)
 
-        if clk_state == self._last_clk_state:
-            return
+        if clk_state != self._last_clk_state:
+            self._last_clk_state = clk_state
 
-        self._last_clk_state = clk_state
+            if clk_state == 0:
+                now = time.monotonic()
 
-        if clk_state != 1:
-            return
+                if now - self._last_rotate_time >= self._rotate_debounce_sec:
+                    self._last_rotate_time = now
 
-        now = time.monotonic()
+                    dt_state = GPIO.input(self._dt_pin)
+                    is_next = (dt_state != clk_state)
 
-        if now - self._last_rotate_time < self._rotate_debounce_sec:
-            return
+                    if self._invert_rotation:
+                        is_next = not is_next
 
-        self._last_rotate_time = now
+                    if is_next:
+                        self._pending_next += 1
+                    else:
+                        self._pending_previous += 1
 
-        dt_state = GPIO.input(self._dt_pin)
-        is_next = (dt_state != clk_state)
+        sw_state = GPIO.input(self._sw_pin)
 
-        if self._invert_rotation:
-            is_next = not is_next
+        if sw_state != self._last_sw_state:
+            self._last_sw_state = sw_state
 
-        self._enqueue_action(
-            "next" if is_next else "previous"
-        )
+            if sw_state == 0:
+                now = time.monotonic()
 
-    def _on_switch_press(self, _channel):
-        self._enqueue_action("click")
-
-    def _drain_actions(self):
-        with self._lock:
-            while self._actions:
-                action = self._actions.popleft()
-
-                if action == "previous":
-                    self._pending_previous += 1
-                elif action == "next":
-                    self._pending_next += 1
-                elif action == "click":
+                if now - self._last_click_time >= self._click_debounce_sec:
+                    self._last_click_time = now
                     self._pending_click += 1
 
     def handle_event(self, event):
@@ -197,8 +163,6 @@ class PhotoFrameController:
     def previous(self):
         if self._keyboard.previous():
             return True
-
-        self._drain_actions()
 
         if self._pending_previous > 0:
             self._pending_previous -= 1
@@ -210,8 +174,6 @@ class PhotoFrameController:
         if self._keyboard.next():
             return True
 
-        self._drain_actions()
-
         if self._pending_next > 0:
             self._pending_next -= 1
             return True
@@ -221,8 +183,6 @@ class PhotoFrameController:
     def click(self):
         if self._keyboard.click():
             return True
-
-        self._drain_actions()
 
         if self._pending_click > 0:
             self._pending_click -= 1

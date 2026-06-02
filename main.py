@@ -181,6 +181,8 @@ def main():
         # INPUT COMMANDS
         # ---------------------------------
 
+        controller.update()
+
         if controller.previous():
 
             current_index = prev_image(
