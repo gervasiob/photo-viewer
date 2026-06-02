@@ -1,5 +1,3 @@
-import pygame
-
 import time
 
 try:
@@ -7,43 +5,6 @@ try:
 except Exception:
     RotaryEncoder = None
     Button = None
-
-
-class KeyboardController:
-
-    def __init__(self):
-        self._previous = False
-        self._next = False
-        self._click = False
-
-    def handle_event(self, event):
-
-        if event.type != pygame.KEYDOWN:
-            return
-
-        if event.key == pygame.K_LEFT:
-            self._previous = True
-
-        elif event.key == pygame.K_RIGHT:
-            self._next = True
-
-        elif event.key == pygame.K_RETURN:
-            self._click = True
-
-    def previous(self):
-        value = self._previous
-        self._previous = False
-        return value
-
-    def next(self):
-        value = self._next
-        self._next = False
-        return value
-
-    def click(self):
-        value = self._click
-        self._click = False
-        return value
 
 
 class PhotoFrameController:
@@ -56,7 +17,6 @@ class PhotoFrameController:
         sw_pin=27,
         invert_rotation=False,
     ):
-        self._keyboard = KeyboardController()
         self._encoder = None
 
         if enable_gpio and RotaryEncoder is not None and Button is not None:
@@ -82,27 +42,21 @@ class PhotoFrameController:
         self._encoder.poll()
 
     def handle_event(self, event):
-        self._keyboard.handle_event(event)
+        return
 
     def previous(self):
-        if self._keyboard.previous():
-            return True
         return (
             self._encoder is not None
             and self._encoder.previous()
         )
 
     def next(self):
-        if self._keyboard.next():
-            return True
         return (
             self._encoder is not None
             and self._encoder.next()
         )
 
     def click(self):
-        if self._keyboard.click():
-            return True
         return (
             self._encoder is not None
             and self._encoder.click()

@@ -166,9 +166,6 @@ def main():
         # ---------------------------------
 
         for event in pygame.event.get():
-
-            controller.handle_event(event)
-
             if event.type == pygame.QUIT:
                 shutdown()
 
