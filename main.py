@@ -6,8 +6,14 @@ from PIL import Image
 
 from input_controller import PhotoFrameController
 
+try:
+    from gpiozero import LED
+except Exception:
+    LED = None
+
 
 PHOTO_FOLDER = "photos"
+STATUS_LED_PIN = 22
 
 SUPPORTED_EXTENSIONS = (
     ".jpg",
@@ -95,6 +101,14 @@ def main():
         return
 
     controller = PhotoFrameController()
+    status_led = LED(STATUS_LED_PIN) if LED is not None else None
+
+    if status_led is not None:
+        status_led.blink(
+            on_time=0.2,
+            off_time=0.2,
+            background=True
+        )
 
     current_index = 0
     slideshow_running = False
@@ -105,6 +119,12 @@ def main():
 
     def shutdown():
         controller.close()
+        if status_led is not None:
+            try:
+                status_led.off()
+                status_led.close()
+            except Exception:
+                pass
         pygame.quit()
         sys.exit()
 
