@@ -1,9 +1,17 @@
 import sys
+import os
 import pygame
 
-from input_controller import PhotoFrameController
-from provider import PlaybackResult
+try:
+    os.environ.setdefault("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR", "0")
+except Exception:
+    pass
+
+from controllers import KnobInputController, MenuKnobController
+from provider import PlaybackResult, ensure_pygame_window_foreground
 from service import MediaService
+from settings_model import Settings
+from menu_controller import MenuController
 
 try:
     from gpiozero import LED
@@ -15,12 +23,14 @@ MEDIA_FOLDER = "photos"
 STATUS_LED_PIN = 22
 
 
-def _status_title(service):
+def _status_title(service, menu):
+    if menu.open:
+        return "Settings"
+
     if not service.has_media():
         return "No media available"
 
     state = "PLAY" if service.slideshow_running() else "PAUSE"
-
     current = service.current_index() + 1
     total = service.total_count()
 
@@ -35,15 +45,21 @@ def main():
 
     screen_width, screen_height = screen.get_size()
 
+    settings = Settings.load()
+
     service = MediaService(
         folder=MEDIA_FOLDER,
         screen_width=screen_width,
         screen_height=screen_height,
         auto_play=True,
+        settings=settings,
     )
     service.refresh(force=True)
 
-    controller = PhotoFrameController()
+    menu = MenuController(screen_width, screen_height)
+
+    nav_controller = KnobInputController()
+    menu_controller = MenuKnobController()
     status_led = None
 
     if LED is not None:
@@ -67,7 +83,11 @@ def main():
         except Exception:
             pass
         try:
-            controller.close()
+            nav_controller.close()
+        except Exception:
+            pass
+        try:
+            menu_controller.close()
         except Exception:
             pass
         if status_led is not None:
@@ -81,10 +101,17 @@ def main():
 
     while True:
         pygame.event.pump()
-        service.tick()
-        service.draw(screen)
 
-        pygame.display.set_caption(_status_title(service))
+        in_menu = menu.open
+
+        if not in_menu:
+            service.tick()
+            service.draw(screen)
+        else:
+            service.draw(screen)
+            menu.draw(screen)
+
+        pygame.display.set_caption(_status_title(service, menu))
         pygame.display.flip()
 
         for event in pygame.event.get():
@@ -93,26 +120,60 @@ def main():
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    shutdown()
+                    if in_menu:
+                        menu.close_menu(save=False)
+                    else:
+                        shutdown()
+                elif in_menu:
+                    menu.handle_event(event)
+                else:
+                    provider_result = service.handle_event(event)
+                    if provider_result == PlaybackResult.NEXT:
+                        service.next()
+                    elif provider_result == PlaybackResult.PREV:
+                        service.previous()
+                    elif provider_result == PlaybackResult.TOGGLE_PLAY:
+                        service.toggle_slideshow()
 
-            provider_result = service.handle_event(event)
-            if provider_result == PlaybackResult.NEXT:
-                service.next()
-            elif provider_result == PlaybackResult.PREV:
+        nav_controller.update()
+
+        menu_controller.update()
+
+        was_in_menu = in_menu
+
+        if in_menu:
+            if menu_controller.wheel_up():
+                menu.handle_wheel_up()
+            if menu_controller.wheel_down():
+                menu.handle_wheel_down()
+            if menu_controller.ok():
+                menu.handle_ok()
+            if menu_controller.back():
+                menu.handle_back()
+        else:
+            if nav_controller.menu():
+                menu.open_menu()
+            if nav_controller.previous():
                 service.previous()
-            elif provider_result == PlaybackResult.TOGGLE_PLAY:
+            if nav_controller.next():
+                service.next()
+            if nav_controller.click():
                 service.toggle_slideshow()
 
-        controller.update()
+        # If we just exited the menu (Save or Cancel), re-focus the pygame window
+        if was_in_menu and not menu.open:
+            settings_after_save = menu.effective_settings()
+            if settings_after_save.order != service.settings.order or (
+                settings_after_save.image_display_ms
+                != service.settings.image_display_ms
+            ):
+                service.apply_settings(settings_after_save)
+            ensure_pygame_window_foreground()
 
-        if controller.previous():
-            service.previous()
-
-        if controller.next():
-            service.next()
-
-        if controller.click():
-            service.toggle_slideshow()
+        # If we just entered the menu from playback, also re-focus to avoid
+        # VLC output lingering or window going behind the desktop.
+        if (not was_in_menu) and menu.open:
+            ensure_pygame_window_foreground()
 
         clock.tick(30)
 

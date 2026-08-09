@@ -9,6 +9,12 @@ from provider import (
     AUDIO_EXTENSIONS,
     detect_file_type,
     create_provider,
+    ImageProvider,
+)
+
+from settings_model import (
+    Settings,
+    order_files,
 )
 
 
@@ -17,24 +23,31 @@ SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + AUDIO_EXTENSIONS
 FOLDER_REFRESH_MS = 15_000
 
 
-def _list_supported_files(folder):
+def _list_supported_files(folder, settings=None):
     if not os.path.exists(folder):
         os.makedirs(folder, exist_ok=True)
         return []
 
-    return sorted(
+    raw = [
         os.path.join(folder, f)
         for f in os.listdir(folder)
         if f.lower().endswith(SUPPORTED_EXTENSIONS)
-    )
+    ]
+
+    if settings is None:
+        settings = Settings()
+
+    return order_files(raw, settings.order)
 
 
 class MediaService:
-    def __init__(self, folder, screen_width, screen_height, auto_play=True):
+    def __init__(self, folder, screen_width, screen_height, auto_play=True, settings=None):
         self.folder = folder
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.auto_play = auto_play
+
+        self.settings = settings if settings is not None else Settings()
 
         self._files = []
         self._queue = []
@@ -48,7 +61,7 @@ class MediaService:
         self._last_transition = pygame.time.get_ticks()
         self._advance_on_finish = False
 
-        self._files = _list_supported_files(self.folder)
+        self._files = _list_supported_files(self.folder, self.settings)
         self._queue = list(self._files)
 
     # ------------------------------------------------------------------
@@ -73,12 +86,45 @@ class MediaService:
     def toggle_slideshow(self):
         self._slideshow_running = not self._slideshow_running
         if self._current_provider is not None:
-            if self._current_type == "image":
-                try:
-                    self._current_provider.toggle_pause()
-                except Exception:
-                    pass
+            try:
+                self._current_provider.toggle_pause()
+            except Exception:
+                pass
         return self._slideshow_running
+
+    def apply_settings(self, settings, reshuffle_when_random=True):
+        self.settings = settings
+
+        old_current = self._current_path
+        new_files = _list_supported_files(self.folder, self.settings)
+
+        if not reshuffle_when_random and self._files and (
+            sorted(new_files) == sorted(self._files)
+        ):
+            self._files = new_files
+            if old_current and old_current in self._files:
+                self._current_index = self._files.index(old_current)
+            else:
+                self._current_index = 0
+            self._queue = [p for p in self._queue if p in self._files]
+            newly_seen = [p for p in self._files if p not in self._queue]
+            self._queue.extend(newly_seen)
+            return
+
+        self._files = new_files
+        self._queue = list(self._files)
+
+        if not self._files:
+            self._current_index = 0
+            self._close_current()
+            return
+
+        if old_current and old_current in self._files:
+            self._current_index = self._files.index(old_current)
+        else:
+            self._current_index = 0
+
+        self._close_current()
 
     # ------------------------------------------------------------------
     # File list + queue management
@@ -95,7 +141,7 @@ class MediaService:
 
         self._last_refresh = now
 
-        new_files = _list_supported_files(self.folder)
+        new_files = _list_supported_files(self.folder, self.settings)
 
         if new_files == self._files:
             return False
@@ -193,6 +239,11 @@ class MediaService:
                 path,
                 self.screen_width,
                 self.screen_height,
+                image_display_ms=(
+                    self.settings.image_display_ms
+                    if file_type == FILE_TYPE_IMAGE
+                    else None
+                ),
             )
             provider.load()
         except Exception as exc:

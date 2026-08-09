@@ -9,6 +9,38 @@ except Exception:
     _vlc = None
 
 
+def ensure_pygame_window_foreground():
+    try:
+        pygame.display.iconify()
+        pygame.time.delay(20)
+    except Exception:
+        pass
+    try:
+        set_mode_kwargs = {}
+        try:
+            pygame.display.mode_ok((0, 0), pygame.FULLSCREEN)
+        except Exception:
+            pass
+        flags = getattr(pygame, "FULLSCREEN", 0)
+        try:
+            if pygame.display.Info().current_w > 0:
+                screen = pygame.display.get_surface()
+                if screen is not None:
+                    pygame.display.set_mode(
+                        screen.get_size(),
+                        flags,
+                        getattr(pygame.display, "get_bpp", lambda: 32)(),
+                    )
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        pygame.display.update()
+    except Exception:
+        pass
+
+
 IMAGE_EXTENSIONS = (
     ".jpg",
     ".jpeg",
@@ -107,14 +139,13 @@ class PlaybackResult:
 
 
 class ImageProvider:
-    DISPLAY_MS = IMAGE_DISPLAY_MS
-
-    def __init__(self, path, screen_width, screen_height):
+    def __init__(self, path, screen_width, screen_height, display_ms=None):
         self.path = path
         self.screen_width = screen_width
         self.screen_height = screen_height
         self._surface = None
         self._draw_xy = (0, 0)
+        self.DISPLAY_MS = int(display_ms if display_ms is not None else IMAGE_DISPLAY_MS)
 
     def load(self):
         with Image.open(self.path) as image:
@@ -339,10 +370,7 @@ class VideoProvider:
         self._player = None
         self._media = None
         self._instance = None
-        try:
-            pygame.display.update()
-        except Exception:
-            pass
+        ensure_pygame_window_foreground()
 
 
 class AudioProvider:
@@ -426,9 +454,20 @@ class AudioProvider:
         self._sound = None
 
 
-def create_provider(file_type, path, screen_width, screen_height):
+def create_provider(
+    file_type,
+    path,
+    screen_width,
+    screen_height,
+    image_display_ms=None,
+):
     if file_type == FILE_TYPE_IMAGE:
-        return ImageProvider(path, screen_width, screen_height)
+        return ImageProvider(
+            path,
+            screen_width,
+            screen_height,
+            display_ms=image_display_ms,
+        )
     if file_type == FILE_TYPE_VIDEO:
         return VideoProvider(path, screen_width, screen_height)
     if file_type == FILE_TYPE_AUDIO:
