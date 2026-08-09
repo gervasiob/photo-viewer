@@ -188,12 +188,15 @@ class MenuKnobController:
         menu_dt_pin=20,
         menu_sw_pin=21,
         invert_wheel_rotation=False,
+        long_press_sec=0.5,
     ):
         self.invert_wheel_rotation = invert_wheel_rotation
+        self.long_press_sec = float(long_press_sec)
 
         self._pending_wheel_up = 0
         self._pending_wheel_down = 0
         self._pending_ok = 0
+        self._pending_open_menu = 0
 
         self._menu_encoder = None
         self._sw_button = None
@@ -201,6 +204,9 @@ class MenuKnobController:
 
         self._last_encoder_steps = 0
         self._last_sw_pressed = False
+
+        self._sw_press_started_at = None
+        self._long_press_emitted_for_current_press = False
 
         self._last_sw_time = 0.0
         self._debounce_sec = 0.20
@@ -266,11 +272,37 @@ class MenuKnobController:
         self._last_encoder_steps = current_steps
 
         sw_pressed = self._sw_button.is_pressed
+        now = time.monotonic()
+
         if sw_pressed and not self._last_sw_pressed:
-            now = time.monotonic()
             if now - self._last_sw_time >= self._debounce_sec:
                 self._last_sw_time = now
+                self._sw_press_started_at = now
+                self._long_press_emitted_for_current_press = False
+        elif sw_pressed and self._last_sw_pressed:
+            if (
+                (not self._long_press_emitted_for_current_press)
+                and (self._sw_press_started_at is not None)
+                and (now - self._sw_press_started_at >= self.long_press_sec)
+            ):
+                self._long_press_emitted_for_current_press = True
+                self._pending_open_menu += 1
+                self._last_sw_time = now
+        elif (not sw_pressed) and self._last_sw_pressed:
+            press_was_long = False
+            if (
+                (self._sw_press_started_at is not None)
+                and (now - self._sw_press_started_at >= self.long_press_sec)
+            ):
+                press_was_long = True
+            self._sw_press_started_at = None
+
+            if not press_was_long and not self._long_press_emitted_for_current_press:
                 self._pending_ok += 1
+                self._last_sw_time = now
+
+            self._long_press_emitted_for_current_press = False
+
         self._last_sw_pressed = sw_pressed
 
     # ------------------------------------------------------------------
@@ -298,4 +330,10 @@ class MenuKnobController:
         ok, new = self._consume(self._pending_ok)
         if ok:
             self._pending_ok = new
+        return ok
+
+    def open_menu_request(self):
+        ok, new = self._consume(self._pending_open_menu)
+        if ok:
+            self._pending_open_menu = new
         return ok

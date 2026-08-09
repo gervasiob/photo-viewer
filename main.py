@@ -149,7 +149,11 @@ def main():
             if menu_controller.ok():
                 menu.handle_ok()
         else:
-            if nav_controller.menu():
+            # Long-press the menu knob's own push button (>=0.5s) to open settings.
+            # The nav menu GPIO (GPIO23) is still supported as an optional fallback.
+            if menu_controller.open_menu_request():
+                menu.open_menu()
+            elif nav_controller.menu():
                 menu.open_menu()
             if nav_controller.previous():
                 service.previous()
