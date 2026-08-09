@@ -3,6 +3,9 @@ import pygame
 
 from provider import (
     PlaybackResult,
+    FILE_TYPE_IMAGE,
+    FILE_TYPE_VIDEO,
+    FILE_TYPE_AUDIO,
     FILE_TYPE_UNKNOWN,
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
