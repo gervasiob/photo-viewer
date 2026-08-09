@@ -89,23 +89,6 @@ def _restart_self():
         sys.exit(0)
 
 
-if __name__ == "__main__":
-    # Important: we only self-update/restart on the *initial* invocation
-    # (before running inner main() + heavy imports like pygame/service).
-    # This guard also prevents an infinite restart loop after re-exec.
-    if os.environ.get("__PHOTO_VIEWER_RESTARTED") != "1":
-        try:
-            updated = _git_pull_on_startup()
-        except Exception as exc:
-            updated = False
-            print(f"[boot] self-update check failed, continuing: {exc}")
-        if updated:
-            os.environ["__PHOTO_VIEWER_RESTARTED"] = "1"
-            _restart_self()
-
-    main()
-
-
 import pygame
 
 from controllers import KnobInputController, MenuKnobController
@@ -320,4 +303,17 @@ def main():
 
 
 if __name__ == "__main__":
+    # Optional self-update via git pull, BEFORE calling main(). We keep this
+    # block at the very end so `def main()` and all imports are defined when
+    # we fall through to the main() call below.
+    if os.environ.get("__PHOTO_VIEWER_RESTARTED") != "1":
+        try:
+            updated = _git_pull_on_startup()
+        except Exception as exc:
+            updated = False
+            print(f"[boot] self-update check failed, continuing: {exc}")
+        if updated:
+            os.environ["__PHOTO_VIEWER_RESTARTED"] = "1"
+            _restart_self()
+
     main()
