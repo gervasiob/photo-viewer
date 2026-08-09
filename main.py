@@ -1,11 +1,112 @@
 import sys
 import os
-import pygame
+import subprocess
 
 try:
     os.environ.setdefault("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR", "0")
 except Exception:
     pass
+
+
+# ---------------------------------------------------------------------------
+# Optional git pull self-update on startup (before importing our modules,
+# so if we pull updated code we can re-exec with the new files).
+# Set SKIP_GIT_PULL=1 to disable (useful on dev machines / no network).
+# ---------------------------------------------------------------------------
+
+
+WATCH_FOR_RELOAD_SUFFIXES = (".py",)
+
+
+def _project_dir():
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _git_pull_on_startup():
+    """
+    Runs `git pull` in the project folder. Returns:
+      - False: could not / did not update code (no git, no repo, no network,
+               already up-to-date, skipped by env var).
+      - True : files were pulled. Caller can re-exec to load the new code.
+    """
+    if os.environ.get("SKIP_GIT_PULL") in ("1", "true", "True", "yes", "YES"):
+        return False
+
+    try:
+        project_root = _project_dir()
+        if not os.path.exists(os.path.join(project_root, ".git")):
+            return False
+    except Exception:
+        return False
+
+    pull_kwargs = {
+        "cwd": project_root,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+    }
+
+    try:
+        result = subprocess.run(["git", "pull", "--ff-only"], **pull_kwargs)
+    except Exception as exc:
+        print(f"[boot] git pull skipped: {exc}")
+        return False
+
+    output = (result.stdout or "").strip()
+    if output:
+        print("[boot] git pull output:\n" + output)
+
+    if result.returncode != 0:
+        print(f"[boot] git pull failed with code {result.returncode}; continuing anyway.")
+        return False
+
+    # Already up to date -> no restart required.
+    if (
+        "Already up to date" in output
+        or "Already up-to-date" in output
+    ):
+        return False
+
+    # Otherwise we assume the pull changed *something* on disk. For safety,
+    # only cause a restart if any tracked .py file appears in the output or
+    # if the result came from a fast-forward merge. The simpler/robust rule
+    # used here is: restart unless git explicitly told us nothing changed.
+    return True
+
+
+def _restart_self():
+    try:
+        python = sys.executable or "python3"
+    except Exception:
+        python = "python3"
+    argv = [python] + sys.argv
+    print(f"[boot] Restarting with updated code: {' '.join(argv)}")
+    try:
+        os.execv(python, argv)
+    except Exception:
+        # execv might not be available on Windows; fall back to a plain exit
+        # so a supervisor can restart us instead.
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    # Important: we only self-update/restart on the *initial* invocation
+    # (before running inner main() + heavy imports like pygame/service).
+    # This guard also prevents an infinite restart loop after re-exec.
+    if os.environ.get("__PHOTO_VIEWER_RESTARTED") != "1":
+        try:
+            updated = _git_pull_on_startup()
+        except Exception as exc:
+            updated = False
+            print(f"[boot] self-update check failed, continuing: {exc}")
+        if updated:
+            os.environ["__PHOTO_VIEWER_RESTARTED"] = "1"
+            _restart_self()
+
+    main()
+
+
+import pygame
 
 from controllers import KnobInputController, MenuKnobController
 from provider import PlaybackResult, ensure_pygame_window_foreground
