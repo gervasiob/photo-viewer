@@ -1,7 +1,12 @@
 import os
 import pygame
 
-from PIL import Image
+from PIL import Image, ImageOps
+
+try:
+    import vlc as _vlc
+except Exception:
+    _vlc = None
 
 
 IMAGE_EXTENSIONS = (
@@ -113,6 +118,11 @@ class ImageProvider:
 
     def load(self):
         with Image.open(self.path) as image:
+            try:
+                image = ImageOps.exif_transpose(image)
+            except Exception:
+                pass
+
             if image.mode not in ("RGB", "RGBA"):
                 image = image.convert("RGBA")
 
@@ -189,26 +199,46 @@ class VideoProvider:
         self.screen_width = screen_width
         self.screen_height = screen_height
 
-        self._movie = None
-        self._movie_size = None
+        self._instance = None
+        self._player = None
+        self._media = None
         self._draw_xy = (0, 0)
+        self._video_size = None
         self._loaded = False
         self._finished = False
+        self._started = False
 
     def load(self):
-        if not hasattr(pygame, "movie"):
+        if _vlc is None:
             raise RuntimeError(
-                "pygame.movie is not available in this build. "
-                "Rebuild pygame with movie support or install a version "
-                "that ships the movie module."
+                "python-vlc is not installed. "
+                "Install it with: pip install python-vlc "
+                "and make sure VLC is installed on this system."
             )
 
-        self._movie = pygame.movie.Movie(self.path)
+        self._instance = _vlc.Instance()
+        self._player = self._instance.media_player_new()
+        self._media = self._instance.media_new(self.path)
+        self._player.set_media(self._media)
 
-        video_size = self._movie.get_size()
-        self._movie_size = compute_fit_size(
-            video_size[0],
-            video_size[1],
+        display_info = pygame.display.Info()
+        try:
+            wid = display_info.wm_window
+        except Exception:
+            wid = 0
+
+        if wid:
+            if os.name == "nt":
+                self._player.set_hwnd(wid)
+            else:
+                try:
+                    self._player.set_xwindow(wid)
+                except Exception:
+                    pass
+
+        self._video_size = compute_fit_size(
+            1920,
+            1080,
             self.screen_width,
             self.screen_height,
             only_shrink=True,
@@ -217,39 +247,38 @@ class VideoProvider:
         self._draw_xy = _center_xy(
             self.screen_width,
             self.screen_height,
-            self._movie_size[0],
-            self._movie_size[1],
+            self._video_size[0],
+            self._video_size[1],
         )
 
-        self._movie.set_display(None, pygame.Rect(
-            self._draw_xy[0],
-            self._draw_xy[1],
-            self._movie_size[0],
-            self._movie_size[1],
-        ))
         self._loaded = True
 
     def start(self):
         self._finished = False
-        if self._movie is not None:
-            self._movie.play()
+        self._started = False
+        if self._player is not None:
+            self._player.play()
+            self._started = True
 
     def is_finished(self):
         if self._finished:
             return True
-        if self._movie is None:
+        if self._player is None:
             return True
-        if self._movie.get_busy():
+        if not self._started:
             return False
-        return True
+        state = self._player.get_state()
+        finished_states = (
+            _vlc.State.Ended if _vlc is not None else None,
+            _vlc.State.Stopped if _vlc is not None else None,
+            _vlc.State.Error if _vlc is not None else None,
+        )
+        return state in [s for s in finished_states if s is not None]
 
     def toggle_pause(self):
-        if self._movie is None:
+        if self._player is None:
             return
-        if self._movie.get_busy():
-            self._movie.pause()
-        else:
-            self._movie.play()
+        self._player.pause()
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
@@ -276,12 +305,28 @@ class VideoProvider:
         screen.fill((0, 0, 0))
 
     def close(self):
-        if self._movie is not None:
+        if self._player is not None:
             try:
-                self._movie.stop()
+                self._player.stop()
             except Exception:
                 pass
-        self._movie = None
+            try:
+                self._player.release()
+            except Exception:
+                pass
+        if self._media is not None:
+            try:
+                self._media.release()
+            except Exception:
+                pass
+        if self._instance is not None:
+            try:
+                self._instance.release()
+            except Exception:
+                pass
+        self._player = None
+        self._media = None
+        self._instance = None
 
 
 class AudioProvider:
