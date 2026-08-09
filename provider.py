@@ -10,29 +10,26 @@ except Exception:
 
 
 def ensure_pygame_window_foreground():
+    """
+    Force the pygame window back to the foreground after VLC (or the WM)
+    may have hidden/minimized it. Important: we intentionally do NOT call
+    pygame.display.iconify() because that temporarily hides the window
+    (causing a black screen) and on some WMs it never returns.
+    """
     try:
-        pygame.display.iconify()
-        pygame.time.delay(20)
-    except Exception:
-        pass
-    try:
-        set_mode_kwargs = {}
-        try:
-            pygame.display.mode_ok((0, 0), pygame.FULLSCREEN)
-        except Exception:
-            pass
         flags = getattr(pygame, "FULLSCREEN", 0)
+        screen = pygame.display.get_surface()
+        if screen is None:
+            return
+        size = screen.get_size()
         try:
-            if pygame.display.Info().current_w > 0:
-                screen = pygame.display.get_surface()
-                if screen is not None:
-                    pygame.display.set_mode(
-                        screen.get_size(),
-                        flags,
-                        getattr(pygame.display, "get_bpp", lambda: 32)(),
-                    )
+            bpp = pygame.display.get_bpp()
         except Exception:
-            pass
+            try:
+                bpp = getattr(pygame.display, "get_bpp", lambda: 32)()
+            except Exception:
+                bpp = 32
+        pygame.display.set_mode(size, flags, bpp)
     except Exception:
         pass
     try:

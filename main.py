@@ -109,7 +109,11 @@ if __name__ == "__main__":
 import pygame
 
 from controllers import KnobInputController, MenuKnobController
-from provider import PlaybackResult, ensure_pygame_window_foreground
+from provider import (
+    PlaybackResult,
+    ensure_pygame_window_foreground,
+    IMAGE_EXTENSIONS,
+)
 from service import MediaService
 from settings_model import Settings
 from menu_controller import MenuController
@@ -205,12 +209,34 @@ def main():
 
         in_menu = menu.open
 
-        if not in_menu:
+        if in_menu:
+            # Always render a solid black background *before* drawing the menu,
+            # so we are not relying on the current provider (especially VLC
+            # video output) drawing something for us. This prevents the window
+            # from appearing "black / stuck" when a video was playing and the
+            # user opens the menu.
+            screen.fill((0, 0, 0))
+
+            # Best-effort: if current provider is an image, blit it dimmed as a
+            # backdrop behind the settings panel. If video/audio we keep black.
+            try:
+                current_path = service.current_file_path()
+                if current_path:
+                    ext = os.path.splitext(current_path)[1].lower()
+                    if ext in IMAGE_EXTENSIONS:
+                        service.draw(screen)
+                        dim = pygame.Surface(
+                            (screen_width, screen_height), pygame.SRCALPHA
+                        )
+                        dim.fill((0, 0, 0, 140))
+                        screen.blit(dim, (0, 0))
+            except Exception:
+                pass
+
+            menu.draw(screen)
+        else:
             service.tick()
             service.draw(screen)
-        else:
-            service.draw(screen)
-            menu.draw(screen)
 
         pygame.display.set_caption(_status_title(service, menu))
         pygame.display.flip()
@@ -273,10 +299,22 @@ def main():
                 service.apply_settings(settings_after_save)
             ensure_pygame_window_foreground()
 
-        # If we just entered the menu from playback, also re-focus to avoid
-        # VLC output lingering or window going behind the desktop.
+        # When entering the menu we *only* pause VLC (video) playback so its
+        # surface doesn't overwrite our menu overlay. We intentionally avoid
+        # ensure_pygame_window_foreground() here because it was causing black
+        # screens on certain window managers / Raspberry Pi OS configurations.
         if (not was_in_menu) and menu.open:
-            ensure_pygame_window_foreground()
+            try:
+                svc_provider = getattr(service, "_current_provider", None)
+                if svc_provider is not None:
+                    name = type(svc_provider).__name__
+                    if name == "VideoProvider":
+                        try:
+                            svc_provider._player.pause()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
         clock.tick(30)
 
