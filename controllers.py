@@ -184,9 +184,9 @@ class MenuKnobController:
 
     def __init__(
         self,
-        menu_clk_pin=22,
-        menu_dt_pin=23,
-        menu_sw_pin=24,
+        menu_clk_pin=26,
+        menu_dt_pin=20,
+        menu_sw_pin=21,
         invert_wheel_rotation=False,
     ):
         self.invert_wheel_rotation = invert_wheel_rotation
