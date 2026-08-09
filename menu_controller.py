@@ -11,12 +11,14 @@ MENU_ITEM_DURATION = 0
 MENU_ITEM_ORDER = 1
 MENU_ITEM_SAVE = 2
 MENU_ITEM_CANCEL = 3
+MENU_ITEM_EXIT = 4
 
 MENU_ITEMS = (
     "Image time",
     "Order",
     "Save & exit",
     "Cancel",
+    "Exit menu",
 )
 
 ORDER_LABELS = {
@@ -130,12 +132,14 @@ class MenuController:
     def activate_selected(self):
         if self._selected_row == MENU_ITEM_SAVE:
             return self.close_menu(save=True)
-        if self._selected_row == MENU_ITEM_CANCEL:
+        if self._selected_row in (MENU_ITEM_CANCEL, MENU_ITEM_EXIT):
             return self.close_menu(save=False)
         return None
 
     # ------------------------------------------------------------------
-    # Knob-style commands (single wheel + press = OK, plus BACK)
+    # Knob-style commands (single wheel + press = OK)
+    # No dedicated back button. Exiting the menu happens via the
+    # "Exit menu" row (or "Cancel"), or keyboard Esc.
     # ------------------------------------------------------------------
 
     @property
@@ -163,6 +167,8 @@ class MenuController:
             if not self._editing_value:
                 self._editing_value = True
             else:
+                # When finishing edit mode, return to normal row navigation
+                # so the user can wheel to other menus right away.
                 self._editing_value = False
                 if self._selected_row < len(MENU_ITEMS) - 1:
                     self.move_row(+1)
@@ -170,6 +176,8 @@ class MenuController:
             self.activate_selected()
 
     def handle_back(self):
+        # Kept for keyboard Esc / LEFT-key fallback behavior.
+        # Hardware menu knob no longer has a back button.
         if self._editing_value:
             self._editing_value = False
         else:
@@ -250,6 +258,8 @@ class MenuController:
             value_text = "Confirm and save settings"
         elif row == MENU_ITEM_CANCEL:
             value_text = "Discard changes and go back"
+        elif row == MENU_ITEM_EXIT:
+            value_text = "Close settings without saving"
         else:
             value_text = ""
 
@@ -303,7 +313,7 @@ class MenuController:
 
         hint = self._hint_font.render(
             "Wheel = move rows / edit value.  Press wheel = OK / toggle edit.  "
-            "Back button or Esc = cancel.",
+            "Go to Exit menu row and press OK (or Esc) to leave.",
             True,
             (180, 180, 180),
         )

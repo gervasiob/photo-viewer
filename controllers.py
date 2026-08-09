@@ -164,28 +164,29 @@ class KnobInputController:
 
 class MenuKnobController:
     """
-    Separate menu hardware: one rotary encoder (with built-in push button)
-    plus a dedicated BACK button.
+    Separate menu hardware: one rotary encoder (with built-in push button).
+    No dedicated back button is required.
 
     Pin usage (different from the NAV controller):
     - Menu encoder (wheel + press):
-        menu_clk_pin, menu_dt_pin  -> wheel rotation
-        menu_sw_pin                -> press = OK / Enter
-    - Menu back button:
-        back_pin                   -> press = Cancel / close menu
+        menu_clk_pin, menu_dt_pin  -> wheel rotation (rows or value edit)
+        menu_sw_pin                -> press = OK / toggle edit
 
     Wheel behavior depends on the menu "edit mode" (managed by the menu
     controller, not here):
     - When NOT editing a value -> wheel moves rows up/down
     - When editing a value     -> wheel increases/decreases the value
+    - Press (OK)               -> enter/exit edit mode or confirm action
+
+    To exit the menu entirely, users navigate (wheel) to the "Exit menu"
+    row and press OK.
     """
 
     def __init__(
         self,
-        menu_clk_pin=22,
-        menu_dt_pin=23,
+        menu_clk_pin=26,
+        menu_dt_pin=16,
         menu_sw_pin=24,
-        back_pin=25,
         invert_wheel_rotation=False,
     ):
         self.invert_wheel_rotation = invert_wheel_rotation
@@ -193,19 +194,15 @@ class MenuKnobController:
         self._pending_wheel_up = 0
         self._pending_wheel_down = 0
         self._pending_ok = 0
-        self._pending_back = 0
 
         self._menu_encoder = None
         self._sw_button = None
-        self._back_button = None
         self._enabled = False
 
         self._last_encoder_steps = 0
         self._last_sw_pressed = False
-        self._last_back_pressed = False
 
         self._last_sw_time = 0.0
-        self._last_back_time = 0.0
         self._debounce_sec = 0.20
 
         if RotaryEncoder is not None and Button is not None:
@@ -216,19 +213,13 @@ class MenuKnobController:
                     wrap=True,
                 )
                 self._sw_button = Button(menu_sw_pin)
-                self._back_button = Button(back_pin)
 
                 self._last_encoder_steps = self._menu_encoder.steps
                 self._last_sw_pressed = self._sw_button.is_pressed
-                self._last_back_pressed = self._back_button.is_pressed
 
                 self._enabled = True
             except Exception:
-                for dev in (
-                    self._menu_encoder,
-                    self._sw_button,
-                    self._back_button,
-                ):
+                for dev in (self._menu_encoder, self._sw_button):
                     try:
                         if dev is not None:
                             dev.close()
@@ -236,7 +227,6 @@ class MenuKnobController:
                         pass
                 self._menu_encoder = None
                 self._sw_button = None
-                self._back_button = None
                 self._enabled = False
 
     @property
@@ -244,11 +234,7 @@ class MenuKnobController:
         return self._enabled
 
     def close(self):
-        for dev in (
-            self._menu_encoder,
-            self._sw_button,
-            self._back_button,
-        ):
+        for dev in (self._menu_encoder, self._sw_button):
             if dev is None:
                 continue
             try:
@@ -257,7 +243,6 @@ class MenuKnobController:
                 pass
         self._menu_encoder = None
         self._sw_button = None
-        self._back_button = None
         self._enabled = False
 
     # ------------------------------------------------------------------
@@ -288,14 +273,6 @@ class MenuKnobController:
                 self._pending_ok += 1
         self._last_sw_pressed = sw_pressed
 
-        back_pressed = self._back_button.is_pressed
-        if back_pressed and not self._last_back_pressed:
-            now = time.monotonic()
-            if now - self._last_back_time >= self._debounce_sec:
-                self._last_back_time = now
-                self._pending_back += 1
-        self._last_back_pressed = back_pressed
-
     # ------------------------------------------------------------------
     # Command consumption
     # ------------------------------------------------------------------
@@ -321,10 +298,4 @@ class MenuKnobController:
         ok, new = self._consume(self._pending_ok)
         if ok:
             self._pending_ok = new
-        return ok
-
-    def back(self):
-        ok, new = self._consume(self._pending_back)
-        if ok:
-            self._pending_back = new
         return ok

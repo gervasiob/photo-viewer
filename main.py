@@ -148,8 +148,6 @@ def main():
                 menu.handle_wheel_down()
             if menu_controller.ok():
                 menu.handle_ok()
-            if menu_controller.back():
-                menu.handle_back()
         else:
             if nav_controller.menu():
                 menu.open_menu()
