@@ -2,9 +2,11 @@ import time
 
 try:
     from gpiozero import RotaryEncoder, Button
+    from gpiozero.exc import BadPinFactory
 except Exception:
     RotaryEncoder = None
     Button = None
+    BadPinFactory = None
 
 
 class PhotoFrameController:
@@ -20,12 +22,15 @@ class PhotoFrameController:
         self._encoder = None
 
         if enable_gpio and RotaryEncoder is not None and Button is not None:
-            self._encoder = EncoderController(
-                clk_pin=clk_pin,
-                dt_pin=dt_pin,
-                sw_pin=sw_pin,
-                invert_rotation=invert_rotation,
-            )
+            try:
+                self._encoder = EncoderController(
+                    clk_pin=clk_pin,
+                    dt_pin=dt_pin,
+                    sw_pin=sw_pin,
+                    invert_rotation=invert_rotation,
+                )
+            except Exception:
+                self._encoder = None
 
     def close(self):
         if self._encoder is None:

@@ -23,8 +23,14 @@ SUPPORTED_EXTENSIONS = (
 
 SLIDESHOW_INTERVAL = 1000
 
+# Revisar la carpeta cada 15 segundos
+PHOTO_REFRESH_INTERVAL = 15_000
+
 
 def load_images(folder):
+    if not os.path.exists(folder):
+        os.makedirs(folder, exist_ok=True)
+
     return [
         os.path.join(folder, f)
         for f in sorted(os.listdir(folder))
@@ -33,33 +39,33 @@ def load_images(folder):
 
 
 def load_and_scale_image(path, screen_width, screen_height):
-    image = Image.open(path)
+    with Image.open(path) as image:
 
-    if image.mode not in ("RGB", "RGBA"):
-        image = image.convert("RGBA")
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA")
 
-    image_width, image_height = image.size
+        image_width, image_height = image.size
 
-    scale = min(
-        screen_width / image_width,
-        screen_height / image_height,
-        1.0
-    )
-
-    if scale < 1.0:
-        new_size = (
-            max(1, int(image_width * scale)),
-            max(1, int(image_height * scale)),
+        scale = min(
+            screen_width / image_width,
+            screen_height / image_height,
+            1.0
         )
 
-        image = image.resize(
-            new_size,
-            Image.Resampling.LANCZOS
-        )
+        if scale < 1.0:
+            new_size = (
+                max(1, int(image_width * scale)),
+                max(1, int(image_height * scale)),
+            )
 
-    mode = image.mode
-    size = image.size
-    data = image.tobytes()
+            image = image.resize(
+                new_size,
+                Image.Resampling.LANCZOS
+            )
+
+        mode = image.mode
+        size = image.size
+        data = image.tobytes()
 
     return pygame.image.fromstring(
         data,
@@ -93,15 +99,14 @@ def main():
 
     images = load_images(PHOTO_FOLDER)
 
-    if not images:
-        print(
-            "Noooooo, sorry my love. "
-            "Find me another folder with photos."
-        )
-        return
-
     controller = PhotoFrameController()
-    status_led = LED(STATUS_LED_PIN) if LED is not None else None
+    status_led = None
+
+    if LED is not None:
+        try:
+            status_led = LED(STATUS_LED_PIN)
+        except Exception:
+            status_led = None
 
     if status_led is not None:
         status_led.blink(
@@ -114,21 +119,108 @@ def main():
     slideshow_running = False
 
     last_slide_change = pygame.time.get_ticks()
+    last_photo_refresh = pygame.time.get_ticks()
 
     clock = pygame.time.Clock()
 
+    # Cache de la imagen actualmente renderizada
+    current_image_path = None
+    image_surface = None
+
     def shutdown():
         controller.close()
+
         if status_led is not None:
             try:
                 status_led.off()
                 status_led.close()
             except Exception:
                 pass
+
         pygame.quit()
         sys.exit()
 
     while True:
+
+        now = pygame.time.get_ticks()
+
+        # ---------------------------------
+        # REFRESH PHOTO LIST
+        # ---------------------------------
+
+        if now - last_photo_refresh >= PHOTO_REFRESH_INTERVAL:
+
+            new_images = load_images(PHOTO_FOLDER)
+
+            if new_images != images:
+
+                print(
+                    f"Photos updated: "
+                    f"{len(images)} -> {len(new_images)}"
+                )
+
+                # Intentamos mantener la misma foto
+                # si todavía existe
+                old_current_image = None
+
+                if images and current_index < len(images):
+                    old_current_image = images[current_index]
+
+                images = new_images
+
+                if images:
+
+                    if (
+                        old_current_image
+                        and old_current_image in images
+                    ):
+                        current_index = images.index(
+                            old_current_image
+                        )
+
+                    elif current_index >= len(images):
+                        current_index = 0
+
+                else:
+                    current_index = 0
+
+                # Fuerza recarga visual
+                current_image_path = None
+                image_surface = None
+
+            last_photo_refresh = now
+
+        # ---------------------------------
+        # NO PHOTOS
+        # ---------------------------------
+
+        if not images:
+
+            screen.fill((0, 0, 0))
+
+            pygame.display.set_caption(
+                "No photos available"
+            )
+
+            pygame.display.flip()
+
+            # Seguimos procesando eventos
+            # para poder salir correctamente
+            for event in pygame.event.get():
+
+                if event.type == pygame.QUIT:
+                    shutdown()
+
+                if event.type == pygame.KEYDOWN:
+
+                    if event.key == pygame.K_ESCAPE:
+                        shutdown()
+
+            controller.update()
+
+            clock.tick(30)
+
+            continue
 
         # ---------------------------------
         # SLIDESHOW
@@ -136,9 +228,10 @@ def main():
 
         if slideshow_running:
 
-            now = pygame.time.get_ticks()
-
-            if now - last_slide_change >= SLIDESHOW_INTERVAL:
+            if (
+                now - last_slide_change
+                >= SLIDESHOW_INTERVAL
+            ):
 
                 current_index = next_image(
                     current_index,
@@ -148,14 +241,47 @@ def main():
                 last_slide_change = now
 
         # ---------------------------------
-        # LOAD IMAGE
+        # LOAD IMAGE ONLY WHEN NECESSARY
         # ---------------------------------
 
-        image_surface = load_and_scale_image(
-            images[current_index],
-            screen_width,
-            screen_height
-        )
+        selected_image = images[current_index]
+
+        if selected_image != current_image_path:
+
+            try:
+                image_surface = load_and_scale_image(
+                    selected_image,
+                    screen_width,
+                    screen_height
+                )
+
+                current_image_path = selected_image
+
+                print(
+                    f"Loaded: {selected_image}"
+                )
+
+            except Exception as exc:
+
+                print(
+                    f"Error loading "
+                    f"{selected_image}: {exc}"
+                )
+
+                current_index = next_image(
+                    current_index,
+                    len(images)
+                )
+
+                current_image_path = None
+
+                clock.tick(30)
+
+                continue
+
+        # ---------------------------------
+        # DRAW IMAGE
+        # ---------------------------------
 
         screen.fill((0, 0, 0))
 
@@ -186,6 +312,7 @@ def main():
         # ---------------------------------
 
         for event in pygame.event.get():
+
             if event.type == pygame.QUIT:
                 shutdown()
 
@@ -207,7 +334,9 @@ def main():
                 len(images)
             )
 
-            last_slide_change = pygame.time.get_ticks()
+            last_slide_change = (
+                pygame.time.get_ticks()
+            )
 
             print(
                 f"Previous -> {current_index + 1}"
@@ -220,7 +349,9 @@ def main():
                 len(images)
             )
 
-            last_slide_change = pygame.time.get_ticks()
+            last_slide_change = (
+                pygame.time.get_ticks()
+            )
 
             print(
                 f"Next -> {current_index + 1}"
@@ -230,6 +361,10 @@ def main():
 
             slideshow_running = (
                 not slideshow_running
+            )
+
+            last_slide_change = (
+                pygame.time.get_ticks()
             )
 
             print(
