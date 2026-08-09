@@ -80,6 +80,7 @@ def main():
         sys.exit()
 
     while True:
+        pygame.event.pump()
         service.tick()
         service.draw(screen)
 

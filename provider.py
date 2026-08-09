@@ -307,6 +307,18 @@ class VideoProvider:
     def close(self):
         if self._player is not None:
             try:
+                self._player.set_hwnd(0)
+            except Exception:
+                pass
+            try:
+                self._player.set_xwindow(0)
+            except Exception:
+                pass
+            try:
+                self._player.set_nsobject(0)
+            except Exception:
+                pass
+            try:
                 self._player.stop()
             except Exception:
                 pass
@@ -327,6 +339,10 @@ class VideoProvider:
         self._player = None
         self._media = None
         self._instance = None
+        try:
+            pygame.display.update()
+        except Exception:
+            pass
 
 
 class AudioProvider:

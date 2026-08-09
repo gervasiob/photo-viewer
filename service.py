@@ -186,6 +186,7 @@ class MediaService:
 
         self._close_current()
 
+        provider = None
         try:
             provider = create_provider(
                 file_type,
@@ -196,6 +197,11 @@ class MediaService:
             provider.load()
         except Exception as exc:
             print(f"[MediaService] Failed to load {path}: {exc}")
+            try:
+                if provider is not None:
+                    provider.close()
+            except Exception:
+                pass
             self._current_provider = None
             self._current_path = None
             self._current_type = FILE_TYPE_UNKNOWN
@@ -210,6 +216,7 @@ class MediaService:
             provider.start()
         except Exception as exc:
             print(f"[MediaService] Failed to start {path}: {exc}")
+            self._close_current()
             return False
 
         self._last_transition = pygame.time.get_ticks()
